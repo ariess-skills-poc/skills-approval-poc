@@ -5,11 +5,71 @@ usage: python3 validate.py <base-ref>      (e.g. origin/main)
 A skill counts as touched if ANY file under its folder changed (SKILL.md, scripts/,
 references/, assets/), including deletions and renames. Exit 1 on any error.
 """
+import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import skilllib as sl  # noqa: E402
+
+
+def plugin_dir(skill_dir):
+    return skill_dir.rsplit("/", 1)[0] if "/" in skill_dir else "."
+
+
+def read_json(ref, path):
+    text = sl.show(ref, path)
+    if text is None:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"{path}: invalid JSON ({e})") from None
+
+
+def check_manifests(mb, head_dirs, base_dirs, touched):
+    """Claude Code reads the marketplace straight from the repo, so the manifests must match
+    the skill folders, and a plugin's version must go up whenever one of its skills changes
+    (Claude Code only updates a plugin when plugin.json's version changes)."""
+    errors = []
+    try:
+        mkt = read_json("HEAD", ".claude-plugin/marketplace.json")
+    except ValueError as e:
+        return [str(e)]
+    if not mkt:
+        return [".claude-plugin/marketplace.json is missing"]
+    listed = {}
+    for entry in mkt.get("plugins", []):
+        src = str(entry.get("source", "")).removeprefix("./").rstrip("/") or "."
+        listed[src] = entry.get("name")
+    needed = {plugin_dir(d) for d in head_dirs if not d.startswith(".github/")}
+    for pd in sorted(needed - set(listed)):
+        errors.append(f"{pd}: contains skills but is not listed in .claude-plugin/marketplace.json")
+    for pd, name in sorted(listed.items()):
+        mpath = f"{pd}/.claude-plugin/plugin.json"
+        try:
+            man = read_json("HEAD", mpath)
+        except ValueError as e:
+            errors.append(str(e)); continue
+        if man is None:
+            errors.append(f"{mpath} is missing (listed in marketplace.json as '{name}')"); continue
+        if man.get("name") != name:
+            errors.append(f"{mpath}: name '{man.get('name')}' differs from marketplace entry '{name}'")
+        if not sl.semver(str(man.get("version", ""))):
+            errors.append(f"{mpath}: version '{man.get('version')}' must be major.minor.patch")
+        if pd not in needed:
+            errors.append(f"{pd}: listed in marketplace.json but has no skills (remove the entry)")
+    for pd in sorted({plugin_dir(d) for d in touched}):
+        mpath = f"{pd}/.claude-plugin/plugin.json"
+        try:
+            new, old = read_json("HEAD", mpath), read_json(mb, mpath)
+        except ValueError:
+            continue
+        if new and old:
+            nv, ov = sl.semver(str(new.get("version", ""))), sl.semver(str(old.get("version", "")))
+            if nv and ov and nv <= ov:
+                errors.append(f"{mpath}: a skill in this plugin changed, bump the plugin version (still {new.get('version')})")
+    return errors
 
 
 def main(base):
@@ -75,6 +135,7 @@ def main(base):
         state = "changed" if d in base_dirs else "new"
         print(f"checked {d} ({state}) v{sl.version_of(fm)}")
 
+    errors += check_manifests(mb, head_dirs, base_dirs, touched)
     for n in notices:
         print(f"::notice::{n}")
     for e in errors:

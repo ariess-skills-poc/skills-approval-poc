@@ -1,0 +1,9 @@
+{
+  "name": "unieuro-skills",
+  "owner": {"name": "Unieuro skills catalog (POC)"},
+  "description": "Published agent skills. Install with /plugin install <plugin>@unieuro-skills",
+  "plugins": [
+    {"name": "data-dataform", "source": "./data/dataengineering/dataform", "description": "Dataform skills"},
+    {"name": "data-looker", "source": "./data/dataviz/looker", "description": "Looker skills (experimental)"}
+  ]
+}

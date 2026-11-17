@@ -1,0 +1,6 @@
+{
+  "name": "data-looker",
+  "version": "1.0.0",
+  "description": "Looker skills (experimental)",
+  "skills": "./"
+}
