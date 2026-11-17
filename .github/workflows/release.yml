@@ -1,9 +1,21 @@
+# Tags every skill whose metadata.version changed in this push: <name>--v<version>.
+#
+# REQUIRED REPO SETTINGS (otherwise review can be bypassed):
+# - Branch protection / ruleset on main: pull request required, code-owner review,
+#   status check "validate" required, no bypass for admins.
+# - Tag ruleset on pattern "*--v*": restrict creation, update and deletion; the only
+#   bypass actor is the identity this workflow runs as (the GitHub Actions app, or the
+#   release GitHub App if you switch to an app token). Without it, anyone with write
+#   access can tag an unreviewed commit as a release.
 name: release
 on:
   push:
     branches: [main]
 permissions:
   contents: write
+concurrency:
+  group: release
+  cancel-in-progress: false
 jobs:
   tag:
     runs-on: ubuntu-latest
@@ -11,17 +23,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml==6.0.2
       - name: Tag new skill versions
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          for f in $(git ls-files '*/SKILL.md'); do
-            name=$(awk -F': *' '/^name:/{print $2; exit}' "$f")
-            ver=$(awk -F': *' '/^ *version:/{gsub(/"/,"",$2); print $2; exit}' "$f")
-            tag="$name--v$ver"
-            if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-              git tag -a "$tag" -m "release $name v$ver"
-              git push origin "$tag"
-              echo "tagged $tag"
-            fi
-          done
+          python .github/scripts/release.py "${{ github.event.before }}" "${{ github.sha }}" --push
