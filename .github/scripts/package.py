@@ -6,7 +6,9 @@ Output (upload <out-dir> to gs://<bucket>/current/):
   .claude-plugin/marketplace.json   Claude Code marketplace: one plugin per <dominio>/<ambito>/<foglia>
   <dominio>/<ambito>/<foglia>/.claude-plugin/plugin.json
   <dominio>/<ambito>/<foglia>/<skill>/...   skill folders, copied as they are on main
-  index.json                        catalog for people, Data Portal and the find-skill agent
+  index.json                        rich catalog (owner, lifecycle, plugin) for Data Portal and find-skill
+  .well-known/agent-skills/index.json   standard discovery index (agentskills.io discovery RFC 0.2.0)
+  .well-known/agent-skills/<name>.tar.gz  one archive per skill (SKILL.md at the archive root)
   release.json                      which commit this catalog was built from
 
 Rules:
@@ -16,7 +18,7 @@ Rules:
   - lifecycle: retired skills are left out; deprecated skills stay, flagged in index.json.
   - Plugin version = 0.<commits touching the plugin folder>.0, so it grows whenever any skill in it changes.
 """
-import json, subprocess, sys
+import hashlib, io, json, subprocess, sys, tarfile
 from datetime import datetime, timezone
 from fnmatch import fnmatch
 from pathlib import Path
@@ -55,6 +57,26 @@ def plugin_name_of(plugin_dir):
     if not parts:
         return "root"
     return f"{parts[0]}-{parts[-1]}" if len(parts) > 1 else parts[0]
+
+
+DISCOVERY_SCHEMA = "https://schemas.agentskills.io/discovery/0.2.0/schema.json"
+
+
+def skill_archive(ref, path):
+    """Deterministic .tar.gz of a skill folder, files at the archive root (no wrapper dir)."""
+    files = sorted(f for f in sl.git("ls-tree", "-r", "-z", "--name-only", ref, "--", path).stdout.split("\0") if f)
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz", format=tarfile.PAX_FORMAT) as tar:
+        for f in files:
+            data = subprocess.run(["git", "show", f"{ref}:{f}"], capture_output=True, check=True).stdout
+            info = tarfile.TarInfo(f[len(path) + 1:])
+            info.size, info.mtime, info.mode = len(data), 0, 0o755 if "/scripts/" in f else 0o644
+            tar.addfile(info, io.BytesIO(data))
+    return buf.getvalue(), files
+
+
+def sha256(data):
+    return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
 def main():
@@ -140,6 +162,22 @@ def main():
     built = datetime.now(timezone.utc).isoformat(timespec="seconds")
     (out / "index.json").write_text(json.dumps(
         {"marketplace": MARKETPLACE, "commit": commit, "built_at": built, "skills": skills}, indent=2) + "\n")
+    wk = out / ".well-known" / "agent-skills"
+    wk.mkdir(parents=True, exist_ok=True)
+    disc = []
+    for sk in skills:
+        data, files = skill_archive(ref, sk["path"])
+        if len(files) == 1:  # only SKILL.md
+            md = subprocess.run(["git", "show", f"{ref}:{sk['path']}/SKILL.md"], capture_output=True, check=True).stdout
+            (wk / sk["name"]).mkdir(exist_ok=True)
+            (wk / sk["name"] / "SKILL.md").write_bytes(md)
+            disc.append({"name": sk["name"], "type": "skill-md", "description": sk["description"][:1024],
+                         "url": f"{sk['name']}/SKILL.md", "digest": sha256(md)})
+        else:
+            (wk / f"{sk['name']}.tar.gz").write_bytes(data)
+            disc.append({"name": sk["name"], "type": "archive", "description": sk["description"][:1024],
+                         "url": f"{sk['name']}.tar.gz", "digest": sha256(data)})
+    (wk / "index.json").write_text(json.dumps({"$schema": DISCOVERY_SCHEMA, "skills": disc}, indent=2) + "\n")
     (out / "release.json").write_text(json.dumps({"commit": commit, "built_at": built}) + "\n")
     print(f"built {len(skills)} skills in {len(entries)} plugins from {commit[:7]} -> {out}")
 
