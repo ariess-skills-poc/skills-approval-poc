@@ -60,8 +60,15 @@ class ValidateTests(unittest.TestCase):
         self.r = Repo()
         self.r.write(f"{SKILL}/SKILL.md", GOOD.format(ver="1.0.0"))
         self.r.write(f"{SKILL}/scripts/run.sh", "echo hi\n")
+        self.r.write(".claude-plugin/marketplace.json",
+                     '{"name": "t", "owner": {"name": "t"}, "plugins": [{"name": "data-eng", "source": "./data/eng"}]}')
+        self.plugin("1.0.0")
         self.r.commit("base")
         self.r.git("checkout", "-qb", "pr")
+
+    def plugin(self, ver):
+        self.r.write("data/eng/.claude-plugin/plugin.json",
+                     '{"name": "data-eng", "version": "%s", "skills": "./"}' % ver)
 
     def tearDown(self):
         self.r.tmp.cleanup()
@@ -75,6 +82,7 @@ class ValidateTests(unittest.TestCase):
 
     def test_change_with_bump_passes(self):
         self.r.write(f"{SKILL}/SKILL.md", GOOD.format(ver="1.1.0") + "more\n")
+        self.plugin("1.1.0")
         self.r.commit("edit")
         res = self.r.validate()
         self.assertEqual(res.returncode, 0, res.stdout)
@@ -88,12 +96,14 @@ class ValidateTests(unittest.TestCase):
 
     def test_quoted_version_passes(self):
         self.r.write(f"{SKILL}/SKILL.md", GOOD.format(ver='"1.0.1"  # bump'))
+        self.plugin("1.1.0")
         self.r.commit("quoted")
         res = self.r.validate()
         self.assertEqual(res.returncode, 0, res.stdout)
 
     def test_crlf_passes(self):
         self.r.write(f"{SKILL}/SKILL.md", GOOD.format(ver="1.0.1"), newline="\r\n")
+        self.plugin("1.1.0")
         self.r.commit("crlf")
         res = self.r.validate()
         self.assertEqual(res.returncode, 0, res.stdout)
@@ -112,7 +122,8 @@ class ValidateTests(unittest.TestCase):
         self.assertIn("not found", res.stdout)
 
     def test_deleted_skill_passes_with_notice(self):
-        self.r.git("rm", "-rq", SKILL)
+        self.r.git("rm", "-rq", SKILL, "data/eng/.claude-plugin")
+        self.r.write(".claude-plugin/marketplace.json", '{"name": "t", "owner": {"name": "t"}, "plugins": []}')
         self.r.commit("delete")
         res = self.r.validate()
         self.assertEqual(res.returncode, 0, res.stdout)
@@ -136,6 +147,21 @@ class ValidateTests(unittest.TestCase):
         res = self.r.validate()
         self.assertEqual(res.returncode, 1, res.stdout)
         self.assertIn("must equal folder name", res.stdout)
+
+
+    def test_skill_bump_without_plugin_bump_fails(self):
+        self.r.write(f"{SKILL}/SKILL.md", GOOD.format(ver="1.1.0"))
+        self.r.commit("edit")
+        res = self.r.validate()
+        self.assertEqual(res.returncode, 1, res.stdout)
+        self.assertIn("bump the plugin version", res.stdout)
+
+    def test_unlisted_skill_folder_fails(self):
+        self.r.write("data/sales/new-skill/SKILL.md", GOOD.format(ver="0.1.0").replace("demo-skill", "new-skill"))
+        self.r.commit("new")
+        res = self.r.validate()
+        self.assertEqual(res.returncode, 1, res.stdout)
+        self.assertIn("not listed in .claude-plugin/marketplace.json", res.stdout)
 
 
 class ReleaseTests(unittest.TestCase):

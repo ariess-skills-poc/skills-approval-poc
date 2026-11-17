@@ -97,7 +97,7 @@ def main():
             "replaced_by": meta.get("replaced_by"), "sunset": meta.get("sunset"),
             "author": meta.get("author"), "owner": owner_of(rules, d),
             "path": d, "plugin": plugin_name_of(pdir), "plugin_dir": pdir, "tag": tag,
-            "install": f"uni-skills install {fm['name']}",
+            "install": f"/plugin install {plugin_name_of(pdir)}@{MARKETPLACE}",
         })
     if errors:
         for e in errors:
@@ -118,8 +118,12 @@ def main():
         plugins.setdefault(s["plugin"], {"dir": s["plugin_dir"], "skills": []})["skills"].append(s)
     entries = []
     for name, p in sorted(plugins.items()):
-        n = int(sl.git("rev-list", "--count", ref, "--", p["dir"]).stdout.strip() or 0)
-        version = f"0.{n}.0"
+        existing = sl.show(ref, f"{p['dir']}/.claude-plugin/plugin.json")
+        if existing:  # the repo's own manifest wins, so GitHub and GCS installs see the same version
+            version = json.loads(existing)["version"]
+        else:
+            n = int(sl.git("rev-list", "--count", ref, "--", p["dir"]).stdout.strip() or 0)
+            version = f"0.{n}.0"
         desc = "; ".join(f"{s['name']} v{s['version']}" for s in p["skills"])
         manifest = {"name": name, "version": version, "description": desc, "skills": "./"}
         pd = out / p["dir"] / ".claude-plugin"
