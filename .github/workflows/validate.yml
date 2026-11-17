@@ -11,4 +11,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: python3 .github/scripts/validate.py origin/${{ github.base_ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml==6.0.2
+      - run: python .github/scripts/validate.py "origin/${{ github.base_ref }}"
