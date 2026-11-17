@@ -1,0 +1,5 @@
+# Each folder is owned by a team. Changing ownership or CI needs the platform team.
+/data/dataengineering/  @ariess-skills-poc/dataeng
+/data/dataviz/          @ariess-skills-poc/dataviz
+/CODEOWNERS             @ariess-skills-poc/platform
+/.github/               @ariess-skills-poc/platform
