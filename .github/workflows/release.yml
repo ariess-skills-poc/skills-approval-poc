@@ -57,6 +57,7 @@ jobs:
         with:
           name: skills-catalog
           path: catalog
+          include-hidden-files: true   # .claude-plugin/ holds the marketplace and plugin manifests
       - name: Authenticate to GCP
         if: ${{ vars.GCS_BUCKET != '' }}
         uses: google-github-actions/auth@v2
