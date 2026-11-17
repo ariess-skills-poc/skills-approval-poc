@@ -3,16 +3,20 @@
 # REQUIRED REPO SETTINGS (otherwise review can be bypassed):
 # - Branch protection / ruleset on main: pull request required, code-owner review,
 #   status check "validate" required, no bypass for admins.
-# - Tag ruleset on pattern "*--v*": restrict creation, update and deletion; the only
-#   bypass actor is the identity this workflow runs as (the GitHub Actions app, or the
-#   release GitHub App if you switch to an app token). Without it, anyone with write
-#   access can tag an unreviewed commit as a release.
+# - Tag ruleset on pattern "*--v*": block update and deletion (tags are immutable).
+#   Creation stays open to people and this workflow: a tag on an unreviewed commit is
+#   harmless because the package job only publishes what is on main (package.py checks
+#   that each skill's tag is an ancestor of main).
+#
+# Publishing to GCS (job "package") runs only when these repo variables are set:
+#   GCS_BUCKET, GCP_WIF_PROVIDER, GCP_SERVICE_ACCOUNT (Workload Identity Federation, no keys).
 name: release
 on:
   push:
     branches: [main]
 permissions:
   contents: write
+  id-token: write
 concurrency:
   group: release
   cancel-in-progress: false
@@ -33,3 +37,34 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           python .github/scripts/release.py "${{ github.event.before }}" "${{ github.sha }}" --push
+
+  package:
+    needs: tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml==6.0.2
+      - name: Build catalog (marketplace.json, index.json, skill folders)
+        run: python .github/scripts/package.py catalog
+      - uses: actions/upload-artifact@v4
+        with:
+          name: skills-catalog
+          path: catalog
+      - name: Authenticate to GCP
+        if: ${{ vars.GCS_BUCKET != '' }}
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - name: Publish to GCS
+        if: ${{ vars.GCS_BUCKET != '' }}
+        uses: google-github-actions/setup-gcloud@v2
+      - if: ${{ vars.GCS_BUCKET != '' }}
+        run: gcloud storage rsync --recursive --delete-unmatched-destination-objects catalog "gs://${{ vars.GCS_BUCKET }}/current"
