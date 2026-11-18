@@ -1,0 +1,33 @@
+# Emails the owning teams when a pull request is opened or marked ready for review.
+# Publishing to Email Hub runs only when the repo variables GCP_WIF_PROVIDER / GCP_SERVICE_ACCOUNT
+# are set (the service account must be in Email Hub's publishers.tf). Otherwise it is a dry run.
+name: notify-owners
+on:
+  pull_request:
+    types: [opened, ready_for_review, reopened]
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  notify:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: google-github-actions/auth@v2
+        if: ${{ vars.GCP_WIF_PROVIDER != '' }}
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+        if: ${{ vars.GCP_WIF_PROVIDER != '' }}
+      - name: Email owners
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          URL: ${{ github.event.pull_request.html_url }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          NUM: ${{ github.event.pull_request.number }}
+          PUBLISH: ${{ vars.GCP_WIF_PROVIDER != '' && format('--publish {0}', vars.EMAIL_HUB_TOPIC) || '' }}
+        run: python3 .github/scripts/notify_owners.py "origin/${{ github.base_ref }}" "$NUM" "$TITLE" "$URL" "$AUTHOR" $PUBLISH
