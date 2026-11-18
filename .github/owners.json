@@ -1,0 +1,6 @@
+{
+  "_comment": "Team -> who gets the email when a PR touches the team's folders. Use team mailing lists where possible.",
+  "@ariess-skills-poc/dataeng":  ["ext_alin@unieuro.com"],
+  "@ariess-skills-poc/dataviz":  ["ext_alin@unieuro.com"],
+  "@ariess-skills-poc/platform": ["ext_alin@unieuro.com"]
+}
